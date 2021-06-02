@@ -77,7 +77,7 @@ defmodule ProjectIdentTest do
     GitModule.delete_repo(repo)
   end
 
-  @moduletag timeout: 100000
+  @moduletag timeout: 100_000
   test "is_rubygem?(repo)", %{tmp_path: tmp_path, project_types: project_types} do
     {:ok, repo} = GitModule.clone_repo("https://github.com/rubocop-hq/rubocop", tmp_path)
 

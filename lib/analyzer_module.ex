@@ -169,59 +169,66 @@ defmodule AnalyzerModule do
       }
 
       Temp.cleanup()
-      {:ok, determine_toplevel_risk(report)}
+      report = determine_toplevel_risk(report)
+      if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
+      {:ok, report}
     rescue
-      MatchError ->
+      e in MatchError ->
+        Logger.warn(e)
         end_time = DateTime.utc_now()
         duration = DateTime.diff(end_time, start_time)
 
-        {:ok,
-         %{
-           header: %{
-             repo: url,
-             start_time: DateTime.to_iso8601(start_time),
-             end_time: DateTime.to_iso8601(end_time),
-             duration: duration,
-             uuid: UUID.uuid1(),
-             source_client: source,
-             library_version: library_version
-           },
-           data: %{
-             # config: Helpers.convert_config_to_list(Application.get_all_env(:lowendinsight)),
-             error: "Unable to analyze the repo (#{url}), is this a valid Git repo URL?",
-             repo: url,
-             git: %{},
-             risk: "undetermined",
-             project_types: %{"undetermined" => "undetermined"},
-             repo_size: "undetermined"
-           }
-         }}
+        report = %{
+          header: %{
+            repo: url,
+            start_time: DateTime.to_iso8601(start_time),
+            end_time: DateTime.to_iso8601(end_time),
+            duration: duration,
+            uuid: UUID.uuid1(),
+            source_client: source,
+            library_version: library_version
+          },
+          data: %{
+            # config: Helpers.convert_config_to_list(Application.get_all_env(:lowendinsight)),
+            error: "Unable to analyze the repo (#{url}), is this a valid Git repo URL?",
+            repo: url,
+            git: %{},
+            risk: "undetermined",
+            project_types: %{"undetermined" => "undetermined"},
+            repo_size: "undetermined"
+          }
+        }
+
+        if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
+        {:ok, report}
 
       e in ArgumentError ->
         end_time = DateTime.utc_now()
         duration = DateTime.diff(end_time, start_time)
 
-        {:ok,
-         %{
-           header: %{
-             repo: url,
-             start_time: DateTime.to_iso8601(start_time),
-             end_time: DateTime.to_iso8601(end_time),
-             duration: duration,
-             uuid: UUID.uuid1(),
-             source_client: source,
-             library_version: library_version
-           },
-           data: %{
-             # config: Helpers.convert_config_to_list(Application.get_all_env(:lowendinsight)),
-             error: "Unable to analyze the repo (#{url}). #{e.message}",
-             repo: url,
-             git: %{},
-             risk: "undetermined",
-             project_types: %{"undetermined" => "undetermined"},
-             repo_size: "undetermined"
-           }
-         }}
+        report = %{
+          header: %{
+            repo: url,
+            start_time: DateTime.to_iso8601(start_time),
+            end_time: DateTime.to_iso8601(end_time),
+            duration: duration,
+            uuid: UUID.uuid1(),
+            source_client: source,
+            library_version: library_version
+          },
+          data: %{
+            # config: Helpers.convert_config_to_list(Application.get_all_env(:lowendinsight)),
+            error: "Unable to analyze the repo (#{url}). #{e.message}",
+            repo: url,
+            git: %{},
+            risk: "undetermined",
+            project_types: %{"undetermined" => "undetermined"},
+            repo_size: "undetermined"
+          }
+        }
+
+        if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
+        {:ok, report}
     after
       Temp.cleanup()
     end
@@ -247,6 +254,20 @@ defmodule AnalyzerModule do
       when is_list(urls) do
     ## Concurrency for parallelizing the analysis. This is the magic.
     ## Will run two jobs per core available max...
+    options =
+      if Application.fetch_env!(:lowendinsight, :persist) do
+        Logger.info("Opening DB")
+        {:ok, conn} = Exqlite.Sqlite3.open(Application.fetch_env!(:lowendinsight, :persist_path))
+
+        Exqlite.Sqlite3.execute(
+          conn,
+          "create table lei (id integer primary key, repo text, risk text, stuff text)"
+        )
+
+        Map.put(options, :db_conn, conn)
+      else
+        options
+      end
 
     {:ok, counter} = CounterAgent.new()
     options = Map.put(options, :counter, counter)
@@ -255,7 +276,7 @@ defmodule AnalyzerModule do
       System.schedulers_online() *
         (Application.get_env(:lowendinsight, :jobs_per_core_max) || 1)
 
-    l =
+    repos =
       urls
       |> Task.async_stream(__MODULE__, :analyze, [source, options],
         timeout: :infinity,
@@ -265,8 +286,8 @@ defmodule AnalyzerModule do
 
     report = %{
       state: "complete",
-      report: %{uuid: UUID.uuid1(), repos: l},
-      metadata: %{repo_count: length(l)}
+      report: %{uuid: UUID.uuid1(), repos: repos},
+      metadata: %{repo_count: length(repos)}
     }
 
     report = determine_risk_counts(report)
@@ -283,6 +304,39 @@ defmodule AnalyzerModule do
     report = report |> Map.put(:metadata, metadata)
 
     {:ok, report}
+  end
+
+  @doc """
+  write_to_db/1: takes in a report, and writes it to a defined db configuration.
+  requires :persist and :persis_path configuration to be defined under :lowendinsight
+  """
+  def write_to_db(report, options) do
+    if Application.fetch_env!(:lowendinsight, :persist) do
+      db_conn =
+        if Map.has_key?(options, :db_conn) do
+          Map.get(options, :db_conn)
+        else
+          Logger.error("Failed to get DB connection from options")
+        end
+
+      {:ok, statement} =
+        Exqlite.Sqlite3.prepare(
+          db_conn,
+          "insert into lei (repo, risk, stuff) values (?1, ?2, ?3)"
+        )
+
+      Exqlite.Sqlite3.bind(db_conn, statement, [
+        report.data.repo,
+        report.data.risk,
+        Poison.encode!(report)
+      ])
+
+      # Step is used to run statements
+      case Exqlite.Sqlite3.step(db_conn, statement) do
+        :done -> Logger.info("Report written to DB")
+        _ -> Logger.error("Error writing to DB")
+      end
+    end
   end
 
   @doc """

@@ -15,8 +15,8 @@ defmodule Mix.Tasks.ScanTest do
       assert_received {:mix_shell, :info, [report]}
 
       report_data = Poison.decode!(report)
-      assert 32 == report_data["metadata"]["repo_count"]
-      assert 12 == report_data["metadata"]["dependency_count"]
+      assert 37 == report_data["metadata"]["repo_count"]
+      assert 13 == report_data["metadata"]["dependency_count"]
     end
   end
 
@@ -46,6 +46,7 @@ defmodule Mix.Tasks.ScanTest do
     end
   end
 
+  @tag timeout: 130_000
   describe "multi hub repo scan/1" do
     test "run scan and report against a package that has a known reference to Bitbucket" do
       {:ok, tmp_path} = Temp.path("lei-analyzer-test")
@@ -86,7 +87,7 @@ defmodule Mix.Tasks.ScanTest do
     assert 3 == Enum.count(reports_list)
   end
 
-  @moduletag timeout: 100000
+  @moduletag timeout: 100_000
   test "run scan against package.json, package-lock.json and yarn.lock" do
     paths = %{
       node: [
@@ -106,7 +107,7 @@ defmodule Mix.Tasks.ScanTest do
   @tag timeout: 140_000
   test "run scan on JS repo, validate report, return report" do
     {:ok, tmp_path} = Temp.path("lei-scan-js-repo-test")
-    {:ok, repo} = GitModule.clone_repo("https://github.com/juliangarnier/anime", tmp_path)
+    {:ok, repo} = GitModule.clone_repo("https://github.com/kitplummer/ws", tmp_path)
 
     Scan.run([repo.path])
     assert_received {:mix_shell, :info, [report]}

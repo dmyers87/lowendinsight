@@ -44,7 +44,8 @@ defmodule GithubModule.MixProject do
       {:json_xema, "~> 0.6"},
       {:temp, "~> 0.4"},
       {:excoveralls, "~> 0.14", only: :test},
-      {:yarn_parser, "~> 0.3"}
+      {:yarn_parser, "~> 0.3"},
+      {:exqlite, "~> 0.6.1"}
     ]
   end
 
