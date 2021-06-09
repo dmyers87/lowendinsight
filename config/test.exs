@@ -8,7 +8,7 @@ config :logger, level: :error
 config :lowendinsight,
   ## Persistence settings
   persist: false,
-  persist_path: "",
+  persist_path: "/Users/cplummer8/Code/lowendinsight/db/test.db",
 
   ## Contributor in terms of discrete users
   ## NOTE: this currently doesn't discern same user with different email
