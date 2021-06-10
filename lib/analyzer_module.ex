@@ -277,9 +277,9 @@ defmodule AnalyzerModule do
       System.schedulers_online() *
         (Application.get_env(:lowendinsight, :jobs_per_core_max) || 1)
 
+    urls = Enum.filter(urls, fn url -> !repo_in_db?(url, options) end)
     repos =
       Enum.uniq(urls)
-      |> Enum.filter(fn url -> !repo_in_db?(url, options) end)
       |> Task.async_stream(__MODULE__, :analyze, [source, options],
         timeout: :infinity,
         max_concurrency: max_concurrency
@@ -287,7 +287,24 @@ defmodule AnalyzerModule do
       |> Enum.map(fn {:ok, report} -> elem(report, 1) end)
 
     if Application.fetch_env!(:lowendinsight, :persist) do
-      {:ok, "processed entries into db."}
+      report = %{
+        state: "complete",
+        report: %{uuid: UUID.uuid1(), repos: repos},
+        metadata: %{repo_count: length(repos)}
+      }
+      end_time = DateTime.utc_now()
+      duration = DateTime.diff(end_time, start_time)
+
+      times = %{
+        start_time: DateTime.to_iso8601(start_time),
+        end_time: DateTime.to_iso8601(end_time),
+        duration: duration
+      }
+      report = determine_risk_counts(report)
+      metadata = Map.put_new(report[:metadata], :times, times)
+      report = report |> Map.put(:metadata, metadata)
+      report = Map.delete(report, :report)
+      {:ok, report}
     else
       report = %{
         state: "complete",
@@ -313,20 +330,19 @@ defmodule AnalyzerModule do
   end
 
   defp repo_in_db?(repo, options) do
-    db_conn =
       if Map.has_key?(options, :db_conn) do
-        Map.get(options, :db_conn)
-      else
-        Logger.error("Failed to get DB connection from options")
-      end
-    # Prepare a select statement
-    {:ok, statement} = Exqlite.Sqlite3.prepare(db_conn, "SELECT id FROM lei WHERE repo LIKE '#{repo}'")
+        db_conn = Map.get(options, :db_conn)
+        # Prepare a select statement
+        {:ok, statement} = Exqlite.Sqlite3.prepare(db_conn, "SELECT id FROM lei WHERE repo LIKE '#{repo}'")
 
-    # Get the results
-    case Exqlite.Sqlite3.step(db_conn, statement) do
-      :done -> false
-      _ -> true
-    end
+        # Get the results
+        case Exqlite.Sqlite3.step(db_conn, statement) do
+          :done -> false
+          _ -> true
+        end
+      else
+        false
+      end
   end
 
   defp write_to_db(report, options) do

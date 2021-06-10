@@ -3,3 +3,5 @@
 # the BSD 3-Clause license. See the LICENSE file for details.
 
 ExUnit.start()
+
+File.rm("/tmp/lei_test.db")

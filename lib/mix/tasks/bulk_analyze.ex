@@ -50,6 +50,10 @@ defmodule Mix.Tasks.Lei.BulkAnalyze do
   def run(args) do
     file = List.first(args)
 
+    if Enum.at(args, 2) == "persist" do
+      Application.put_env(:lowendinsight, :persist, true)
+    end
+
     case File.exists?(file) do
       false ->
         Mix.shell().info("\ninvalid file provided")

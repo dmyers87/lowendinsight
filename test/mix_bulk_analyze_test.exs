@@ -20,6 +20,7 @@ defmodule Mix.Tasks.BulkAnalyzeTest do
 
     @tag timeout: 180_000
     test "run scan against NPM cleaned list" do
+      File.rm("/tmp/lei_test.db")
       args = ["#{File.cwd!()}/test/fixtures/npm.short.csv", "no_validation" | []]
       BulkAnalyze.run(args)
       assert_received {:mix_shell, :info, [report]}
@@ -41,6 +42,20 @@ defmodule Mix.Tasks.BulkAnalyzeTest do
       BulkAnalyze.run(args)
       assert_received {:mix_shell, :info, [report]}
       assert report == "\ninvalid file contents"
+    end
+  end
+
+  describe "run with persistence" do
+    test "run scan against NPM cleaned list and persist" do
+      File.rm("/tmp/lei_test.db")
+      args = ["#{File.cwd!()}/test/fixtures/npm.short.csv", "no_validation", "persist" | []]
+      BulkAnalyze.run(args)
+      assert_received {:mix_shell, :info, [report]}
+
+      report_data = Poison.decode!(report)
+      assert 10 == report_data["metadata"]["repo_count"]
+      assert 7 == report_data["metadata"]["risk_counts"]["undetermined"]
+      File.rm("/tmp/lei_test.db")
     end
   end
 end
