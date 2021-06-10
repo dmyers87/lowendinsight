@@ -7,6 +7,7 @@ config :logger, level: :error
 
 config :lowendinsight,
   ## Persistence settings
+<<<<<<< HEAD
   persist: true,
   persist_path: "/tmp/test.db",
 

@@ -13,6 +13,7 @@ defmodule AnalyzerModule do
 
   @spec analyze(binary | maybe_improper_list, any, any) :: {:ok, map}
   def analyze(url, source, options) when is_binary(url) do
+
     count =
       if Map.has_key?(options, :counter) do
         CounterAgent.click(options[:counter])
@@ -261,7 +262,7 @@ defmodule AnalyzerModule do
 
         Exqlite.Sqlite3.execute(
           conn,
-          "create table lei (id integer primary key, repo text, risk text, stuff text)"
+          "create table lei (id integer primary key, repo text, risk text, created_at text, stuff text)"
         )
 
         Map.put(options, :db_conn, conn)
@@ -277,40 +278,58 @@ defmodule AnalyzerModule do
         (Application.get_env(:lowendinsight, :jobs_per_core_max) || 1)
 
     repos =
-      urls
+      Enum.uniq(urls)
+      |> Enum.filter(fn url -> !repo_in_db?(url, options) end)
       |> Task.async_stream(__MODULE__, :analyze, [source, options],
         timeout: :infinity,
         max_concurrency: max_concurrency
       )
       |> Enum.map(fn {:ok, report} -> elem(report, 1) end)
 
-    report = %{
-      state: "complete",
-      report: %{uuid: UUID.uuid1(), repos: repos},
-      metadata: %{repo_count: length(repos)}
-    }
+    if Application.fetch_env!(:lowendinsight, :persist) do
+      {:ok, "processed entries into db."}
+    else
+      report = %{
+        state: "complete",
+        report: %{uuid: UUID.uuid1(), repos: repos},
+        metadata: %{repo_count: length(repos)}
+      }
 
-    report = determine_risk_counts(report)
-    end_time = DateTime.utc_now()
-    duration = DateTime.diff(end_time, start_time)
+      report = determine_risk_counts(report)
+      end_time = DateTime.utc_now()
+      duration = DateTime.diff(end_time, start_time)
 
-    times = %{
-      start_time: DateTime.to_iso8601(start_time),
-      end_time: DateTime.to_iso8601(end_time),
-      duration: duration
-    }
+      times = %{
+        start_time: DateTime.to_iso8601(start_time),
+        end_time: DateTime.to_iso8601(end_time),
+        duration: duration
+      }
 
-    metadata = Map.put_new(report[:metadata], :times, times)
-    report = report |> Map.put(:metadata, metadata)
+      metadata = Map.put_new(report[:metadata], :times, times)
+      report = report |> Map.put(:metadata, metadata)
 
-    {:ok, report}
+      {:ok, report}
+    end
   end
 
-  @doc """
-  write_to_db/1: takes in a report, and writes it to a defined db configuration.
-  requires :persist and :persis_path configuration to be defined under :lowendinsight
-  """
-  def write_to_db(report, options) do
+  defp repo_in_db?(repo, options) do
+    db_conn =
+      if Map.has_key?(options, :db_conn) do
+        Map.get(options, :db_conn)
+      else
+        Logger.error("Failed to get DB connection from options")
+      end
+    # Prepare a select statement
+    {:ok, statement} = Exqlite.Sqlite3.prepare(db_conn, "SELECT id FROM lei WHERE repo LIKE '#{repo}'")
+
+    # Get the results
+    case Exqlite.Sqlite3.step(db_conn, statement) do
+      :done -> false
+      _ -> true
+    end
+  end
+
+  defp write_to_db(report, options) do
     if Application.fetch_env!(:lowendinsight, :persist) do
       db_conn =
         if Map.has_key?(options, :db_conn) do
@@ -328,12 +347,13 @@ defmodule AnalyzerModule do
       {:ok, statement} =
         Exqlite.Sqlite3.prepare(
           db_conn,
-          "insert into lei (repo, risk, stuff) values (?1, ?2, ?3)"
+          "insert into lei (repo, risk, created_at, stuff) values (?1, ?2, ?3, ?4)"
         )
 
       Exqlite.Sqlite3.bind(db_conn, statement, [
         report.data.repo,
         report.data.risk,
+        DateTime.utc_now() |> DateTime.to_iso8601(),
         Poison.encode!(report)
       ])
 
