@@ -7,8 +7,8 @@ config :logger, level: :error
 
 config :lowendinsight,
   ## Persistence settings
-  persist: false,
-  persist_path: "",
+  persist: true,
+  persist_path: "/tmp/test.db",
 
   ## Contributor in terms of discrete users
   ## NOTE: this currently doesn't discern same user with different email

@@ -7,7 +7,7 @@ config :logger, level: :debug
 
 config :lowendinsight,
   persist: true,
-  persist_path: "/Users/cplummer8/Code/lowendinsight/db/dev.db",
+  persist_path: "/home/cplummer8/Code/lowendinsight/db/dev.db",
   ## Contributor in terms of discrete users
   ## NOTE: this currently doesn't discern same user with different email
   critical_contributor_level:

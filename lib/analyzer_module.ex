@@ -316,7 +316,13 @@ defmodule AnalyzerModule do
         if Map.has_key?(options, :db_conn) do
           Map.get(options, :db_conn)
         else
-          Logger.error("Failed to get DB connection from options")
+          {:ok, conn} = Exqlite.Sqlite3.open(Application.fetch_env!(:lowendinsight, :persist_path))
+
+          Exqlite.Sqlite3.execute(
+            conn,
+            "create table lei (id integer primary key, repo text, risk text, stuff text)"
+          )
+          conn
         end
 
       {:ok, statement} =
