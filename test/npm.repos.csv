@@ -1,0 +1,4 @@
+git+https://github.com/RegExpRegExp/-KeyboardEvent.git
+git+https://github.com/tlecoeuv/palindrome.git
+git+https://github.com/panpan1231/tompan-reacttemplate.git
+给String内置对象通过原型添加一个去除首尾空格的方法

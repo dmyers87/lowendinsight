@@ -171,7 +171,6 @@ defmodule AnalyzerModule do
 
       Temp.cleanup()
       report = determine_toplevel_risk(report)
-      if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
       {:ok, report}
     rescue
       e in MatchError ->
@@ -199,8 +198,6 @@ defmodule AnalyzerModule do
             repo_size: "undetermined"
           }
         }
-
-        if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
         {:ok, report}
 
       e in ArgumentError ->
@@ -227,8 +224,6 @@ defmodule AnalyzerModule do
             repo_size: "undetermined"
           }
         }
-
-        if Application.fetch_env!(:lowendinsight, :persist), do: write_to_db(report, options)
         {:ok, report}
     after
       Temp.cleanup()
@@ -253,110 +248,43 @@ defmodule AnalyzerModule do
   @spec analyze([binary], any, any, any) :: {:ok, map}
   def analyze(urls, source \\ "lei", start_time \\ DateTime.utc_now(), options \\ %{})
       when is_list(urls) do
-    ## Concurrency for parallelizing the analysis. This is the magic.
-    ## Will run two jobs per core available max...
-    options =
-      if Application.fetch_env!(:lowendinsight, :persist) do
-        Logger.info("Opening DB")
-        {:ok, conn} = Exqlite.Sqlite3.open(Application.fetch_env!(:lowendinsight, :persist_path))
-
-        Exqlite.Sqlite3.execute(
-          conn,
-          "create table lei (id integer primary key, repo text, risk text, created_at text, stuff text)"
-        )
-
-        Map.put(options, :db_conn, conn)
-      else
-        options
-      end
-
     {:ok, counter} = CounterAgent.new()
     options = Map.put(options, :counter, counter)
 
+    ## Concurrency for parallelizing the analysis. This is the magic.
+    ## Default one process per core available.  Overriden in config.
     max_concurrency =
       System.schedulers_online() *
         (Application.get_env(:lowendinsight, :jobs_per_core_max) || 1)
 
     repos =
       Enum.uniq(urls)
-      |> Enum.filter(fn url -> !repo_in_db?(url, options) end)
       |> Task.async_stream(__MODULE__, :analyze, [source, options],
         timeout: :infinity,
         max_concurrency: max_concurrency
       )
       |> Enum.map(fn {:ok, report} -> elem(report, 1) end)
 
-    if Application.fetch_env!(:lowendinsight, :persist) do
-      {:ok, "processed entries into db."}
-    else
-      report = %{
+    report = %{
         state: "complete",
         report: %{uuid: UUID.uuid1(), repos: repos},
         metadata: %{repo_count: length(repos)}
       }
 
-      report = determine_risk_counts(report)
-      end_time = DateTime.utc_now()
-      duration = DateTime.diff(end_time, start_time)
+    report = determine_risk_counts(report)
+    end_time = DateTime.utc_now()
+    duration = DateTime.diff(end_time, start_time)
 
-      times = %{
+    times = %{
         start_time: DateTime.to_iso8601(start_time),
         end_time: DateTime.to_iso8601(end_time),
         duration: duration
       }
 
-      metadata = Map.put_new(report[:metadata], :times, times)
-      report = report |> Map.put(:metadata, metadata)
+    metadata = Map.put_new(report[:metadata], :times, times)
+    report = report |> Map.put(:metadata, metadata)
 
-      {:ok, report}
-    end
-  end
-
-  defp repo_in_db?(repo, options) do
-    db_conn =
-      if Map.has_key?(options, :db_conn) do
-        Map.get(options, :db_conn)
-      else
-        Logger.error("Failed to get DB connection from options")
-      end
-    # Prepare a select statement
-    {:ok, statement} = Exqlite.Sqlite3.prepare(db_conn, "SELECT id FROM lei WHERE repo LIKE '#{repo}'")
-
-    # Get the results
-    case Exqlite.Sqlite3.step(db_conn, statement) do
-      :done -> false
-      _ -> true
-    end
-  end
-
-  defp write_to_db(report, options) do
-    if Application.fetch_env!(:lowendinsight, :persist) do
-      db_conn =
-        if Map.has_key?(options, :db_conn) do
-          Map.get(options, :db_conn)
-        else
-          Logger.error("Failed to get DB connection from options")
-        end
-
-      {:ok, statement} =
-        Exqlite.Sqlite3.prepare(
-          db_conn,
-          "insert into lei (repo, risk, created_at, stuff) values (?1, ?2, ?3, ?4)"
-        )
-
-      Exqlite.Sqlite3.bind(db_conn, statement, [
-        report.data.repo,
-        report.data.risk,
-        DateTime.utc_now() |> DateTime.to_iso8601(),
-        Poison.encode!(report)
-      ])
-
-      # Step is used to run statements
-      case Exqlite.Sqlite3.step(db_conn, statement) do
-        :done -> Logger.info("Report written to DB")
-        _ -> Logger.error("Error writing to DB")
-      end
-    end
+    {:ok, report}
   end
 
   @doc """

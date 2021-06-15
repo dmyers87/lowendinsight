@@ -61,7 +61,8 @@ defmodule Mix.Tasks.Lei.BulkAnalyze do
 
         ## Hacking in a simple handler to bypass validation for the bulk analyzer for a specific
         ## use case where we need to process invalid URLs listed in a repos pointer to the source
-        ## code.
+        ## code.  Setting `types: false` disables the package type scan since we are all the same
+        ## here, processing a list of like packages from a central repo.
         if Enum.at(args, 1) == "no_validation" do
           {:ok, report} =
             AnalyzerModule.analyze(urls, "mix task", DateTime.utc_now(), %{types: false})
